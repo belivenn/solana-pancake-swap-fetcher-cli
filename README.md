@@ -227,9 +227,4 @@ If you encounter any issues or have questions:
 - [ ] Add historical data analysis
 - [ ] Implement pool health scoring
 
-## 🙏 Acknowledgments
 
-- [PancakeSwap](https://pancakeswap.finance/) for the protocol
-- [Solana Labs](https://solana.com/) for the blockchain
-- [Jupiter](https://jup.ag/) for price data
-- [SPL Token](https://spl.solana.com/token) for token standards
