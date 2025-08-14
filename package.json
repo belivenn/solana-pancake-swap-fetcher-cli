@@ -1,6 +1,6 @@
 {
   "name": "solana-pancake-swap",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "PancakeSwap pool fetcher CLI for Solana",
   "main": "dist/index.js",
   "bin": {
