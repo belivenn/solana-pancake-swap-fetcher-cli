@@ -20,6 +20,7 @@ export class CLI {
     console.log("  spswap [max_pools]                          # Short alias");
     console.log("\n📊 Example:");
     console.log("  solana-pancake-swap 50 --rpc https://your-rpc.com     # Fetch 50 pools");
+    console.log("  solana-pancake-swap --cached                # Use cached pools (skip chain fetch)");
     console.log("\n🔗 RPC Configuration:");
     console.log("  • RPC URL is required for all commands");
     console.log("  • Use --rpc or -r flag to specify your endpoint");
@@ -29,6 +30,9 @@ export class CLI {
     console.log("  • pancakeswap_pools.json                   # All valid pools");
     console.log("  • pancakeswap_inactive_pools.json          # Inactive pools");
     console.log("  • pancakeswap_no_volume_pools.json         # No-volume pools");
+    console.log("\n⚡ Cache:");
+    console.log("  • By default, fetches fresh data from chain");
+    console.log("  • Use --cached to use previously saved pools");
     console.log("");
   }
 
@@ -40,15 +44,16 @@ export class CLI {
     }
     
     // Check for unknown flags
-    const unknownFlags = args.filter(arg => arg.startsWith('--') && !['--rpc', '--help'].includes(arg));
+    const unknownFlags = args.filter(arg => arg.startsWith('--') && !['--rpc', '--help', '--cached'].includes(arg));
     if (unknownFlags.length > 0) {
       console.error(`❌ Error: Unknown flag(s): ${unknownFlags.join(', ')}`);
       console.error("💡 Use --help to see available options");
       return;
     }
     
-    // Parse RPC URL from the end of arguments
+    // Parse RPC URL and cached flag from arguments
     let rpcUrl: string | undefined;
+    let useCached: boolean = false;
     let filteredArgs: string[] = [];
     
     // Look for --rpc or -r at the end
@@ -64,6 +69,13 @@ export class CLI {
           return;
         }
       }
+    }
+    
+    // Check for --cached flag
+    const cachedIndex = args.indexOf('--cached');
+    if (cachedIndex !== -1) {
+      useCached = true;
+      args.splice(cachedIndex, 1); // Remove the flag
     }
     
     // All remaining args are command args
@@ -104,7 +116,7 @@ export class CLI {
     if (command === 'inactive') {
       const maxPools = filteredArgs[1] ? parseInt(filteredArgs[1]) : -1;
       console.log(`\n🚀 Fetching inactive pools${maxPools > 0 ? ` (max: ${maxPools})` : ''}...`);
-      const pools = await this.fetcher!.fetchInactivePools(maxPools);
+      const pools = await this.fetcher!.fetchInactivePools(maxPools, useCached);
       console.log(`✨ Found ${pools.length} inactive pools`);
       return;
     }
@@ -112,7 +124,7 @@ export class CLI {
     if (command === 'no-volume') {
       const maxPools = filteredArgs[1] ? parseInt(filteredArgs[1]) : -1;
       console.log(`\n🚀 Fetching no-volume pools${maxPools > 0 ? ` (max: ${maxPools})` : ''}...`);
-      const pools = await this.fetcher!.fetchNoVolumePools(maxPools);
+      const pools = await this.fetcher!.fetchNoVolumePools(maxPools, useCached);
       console.log(`✨ Found ${pools.length} no-volume pools`);
       return;
     }
@@ -129,8 +141,10 @@ export class CLI {
     // Default: fetch all pools
     const maxPools = command ? parseInt(command) : -1;
     console.log(`\n🚀 Fetching pools${maxPools > 0 ? ` (max: ${maxPools})` : ''}...`);
-    const pools = await this.fetcher!.fetchPools(maxPools);
-    this.storage.savePools(pools);
+    const pools = await this.fetcher!.fetchPools(maxPools, useCached);
+    if (!useCached) {
+      this.storage.savePools(pools);
+    }
     console.log(`✨ Found ${pools.length} valid pools`);
   }
 }

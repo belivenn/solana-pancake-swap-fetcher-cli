@@ -154,8 +154,22 @@ export class PancakeFetcher {
     }
   }
 
-  async fetchPools(maxPools: number = -1): Promise<PoolInfo[]> {
-    console.log("🔍 Fetching PancakeSwap pools...");
+  async fetchPools(maxPools: number = -1, useCached: boolean = false): Promise<PoolInfo[]> {
+    // Check cache first if useCached flag is set
+    if (useCached) {
+      const cachedPools = this.storage.loadPools();
+      if (cachedPools && cachedPools.length > 0) {
+        console.log(`📂 Using cached pools (${cachedPools.length} pools)`);
+        if (maxPools > 0) {
+          return cachedPools.slice(0, maxPools);
+        }
+        return cachedPools;
+      } else {
+        console.log("⚠️  No cached pools found, fetching from chain instead...");
+      }
+    }
+    
+    console.log("🔍 Fetching PancakeSwap pools from chain...");
     
     try {
       const filters: GetProgramAccountsFilter[] = [];
@@ -189,6 +203,10 @@ export class PancakeFetcher {
       }
       
       console.log(`🎯 Found ${validPools.length} valid pools out of ${poolAccounts.length} accounts`);
+      
+      // Save to cache (only when fetching from chain)
+      this.storage.savePools(validPools);
+      
       return validPools;
       
     } catch (error) {
@@ -197,10 +215,10 @@ export class PancakeFetcher {
     }
   }
 
-  async fetchInactivePools(maxPools: number = -1): Promise<PoolInfo[]> {
+  async fetchInactivePools(maxPools: number = -1, useCached: boolean = false): Promise<PoolInfo[]> {
     console.log("🔍 Fetching inactive pools...");
     
-    const allPools = await this.fetchPools(maxPools);
+    const allPools = await this.fetchPools(maxPools, useCached);
     const inactivePools = allPools.filter(pool => pool.balance0 === 0 || pool.balance1 === 0);
     
     console.log(`🎯 Found ${inactivePools.length} inactive pools`);
@@ -209,10 +227,10 @@ export class PancakeFetcher {
     return inactivePools;
   }
 
-  async fetchNoVolumePools(maxPools: number = -1): Promise<PoolInfo[]> {
+  async fetchNoVolumePools(maxPools: number = -1, useCached: boolean = false): Promise<PoolInfo[]> {
     console.log("🔍 Fetching no-volume pools...");
     
-    const allPools = await this.fetchPools(maxPools);
+    const allPools = await this.fetchPools(maxPools, useCached);
     const noVolumePools: PoolInfo[] = [];
     
     for (const pool of allPools) {

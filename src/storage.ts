@@ -6,7 +6,7 @@ export class Storage {
   private baseDir: string;
   private configFile: string;
 
-  constructor(baseDir: string = __dirname) {
+  constructor(baseDir: string = process.cwd()) {
     this.baseDir = baseDir;
     this.configFile = path.join(process.cwd(), '.solana-pancake-swap-config.json');
   }
