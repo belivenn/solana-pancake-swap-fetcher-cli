@@ -2,7 +2,7 @@ import { Connection, PublicKey, GetProgramAccountsFilter } from "@solana/web3.js
 import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, getAccount } from "@solana/spl-token";
 import { PoolInfo, PoolState } from './types';
 import { PANCAKESWAP_PROGRAM_ID, POOL_STATE_DISCRIMINATOR, getRpcUrl } from './constants';
-import { getTokenSymbol, sleep } from './utils';
+import { getTokenSymbol, sleep, getBatchTokenPrices, calculateTVL } from './utils';
 import { Storage } from './storage';
 
 export class PancakeFetcher {
@@ -154,9 +154,9 @@ export class PancakeFetcher {
     }
   }
 
-  async fetchPools(maxPools: number = -1, useCached: boolean = false): Promise<PoolInfo[]> {
-    // Check cache first if useCached flag is set
-    if (useCached) {
+  async fetchPools(maxPools: number = -1, useCached: boolean = false, forceRefresh: boolean = false): Promise<PoolInfo[]> {
+    // Check cache first if useCached flag is set and not forcing refresh
+    if (useCached && !forceRefresh) {
       const cachedPools = this.storage.loadPools();
       if (cachedPools && cachedPools.length > 0) {
         console.log(`📂 Using cached pools (${cachedPools.length} pools)`);
@@ -167,6 +167,10 @@ export class PancakeFetcher {
       } else {
         console.log("⚠️  No cached pools found, fetching from chain instead...");
       }
+    }
+    
+    if (forceRefresh) {
+      console.log("🔄 Force refresh: ignoring cache and fetching from chain...");
     }
     
     console.log("🔍 Fetching PancakeSwap pools from chain...");
@@ -215,10 +219,56 @@ export class PancakeFetcher {
     }
   }
 
-  async fetchInactivePools(maxPools: number = -1, useCached: boolean = false): Promise<PoolInfo[]> {
+  async fetchPoolsWithoutSaving(maxPools: number = -1): Promise<PoolInfo[]> {
+    console.log("🔍 Fetching PancakeSwap pools from chain (without saving to cache)...");
+    
+    try {
+      const filters: GetProgramAccountsFilter[] = [];
+      const poolAccounts = await this.connection.getProgramAccounts(PANCAKESWAP_PROGRAM_ID, {
+        filters,
+        encoding: 'base64',
+      });
+
+      console.log(`📊 Found ${poolAccounts.length} total accounts`);
+      
+      const validPools: PoolInfo[] = [];
+      
+      for (let i = 0; i < poolAccounts.length; i++) {
+        const account = poolAccounts[i];
+        if (!account) continue;
+        const poolData = await this.fetchPoolData(account.pubkey.toString());
+        
+        if (poolData) {
+          validPools.push(poolData);
+          
+          // If we have a limit and reached it, stop processing
+          if (maxPools !== -1 && validPools.length >= maxPools) {
+            break;
+          }
+        }
+        
+        if ((i + 1) % 10 === 0) {
+          console.log(`✅ Processed ${i + 1}/${poolAccounts.length}, found ${validPools.length} valid pools`);
+          await sleep(100); // Rate limiting
+        }
+      }
+      
+      console.log(`🎯 Found ${validPools.length} valid pools out of ${poolAccounts.length} accounts`);
+      
+      // Don't save to cache - this is the key difference
+      
+      return validPools;
+      
+    } catch (error) {
+      console.error("❌ Error fetching pools:", error);
+      return [];
+    }
+  }
+
+  async fetchInactivePools(maxPools: number = -1, useCached: boolean = false, forceRefresh: boolean = false): Promise<PoolInfo[]> {
     console.log("🔍 Fetching inactive pools...");
     
-    const allPools = await this.fetchPools(maxPools, useCached);
+    const allPools = await this.fetchPools(maxPools, useCached, forceRefresh);
     const inactivePools = allPools.filter(pool => pool.balance0 === 0 || pool.balance1 === 0);
     
     console.log(`🎯 Found ${inactivePools.length} inactive pools`);
@@ -227,10 +277,10 @@ export class PancakeFetcher {
     return inactivePools;
   }
 
-  async fetchNoVolumePools(maxPools: number = -1, useCached: boolean = false): Promise<PoolInfo[]> {
+  async fetchNoVolumePools(maxPools: number = -1, useCached: boolean = false, forceRefresh: boolean = false): Promise<PoolInfo[]> {
     console.log("🔍 Fetching no-volume pools...");
     
-    const allPools = await this.fetchPools(maxPools, useCached);
+    const allPools = await this.fetchPools(maxPools, useCached, forceRefresh);
     const noVolumePools: PoolInfo[] = [];
     
     for (const pool of allPools) {
@@ -256,7 +306,6 @@ export class PancakeFetcher {
           pool.hasVolume = false;
           pool.lastTradeTime = 0;
           noVolumePools.push(pool);
-          this.storage.appendPool(pool, 'pancakeswap_no_volume_pools.json');
         }
         
         await sleep(1000); // Rate limiting
@@ -266,6 +315,257 @@ export class PancakeFetcher {
     }
     
     console.log(`🎯 Found ${noVolumePools.length} no-volume pools`);
+    this.storage.savePools(noVolumePools, 'pancakeswap_no_volume_pools.json');
     return noVolumePools;
   }
+
+  async fetchNewPools(maxPools: number = -1, useCached: boolean = false, forceRefresh: boolean = false): Promise<PoolInfo[]> {
+    console.log("🔍 Fetching new pools...");
+    
+    // Load the previous cache to compare against
+    const previousPools = this.storage.loadPools('pancakeswap_pools.json');
+    if (!previousPools || previousPools.length === 0) {
+      console.log("⚠️  No previous pools cache found. All pools will be considered new.");
+      const allPools = await this.fetchPools(maxPools, useCached, forceRefresh);
+      this.storage.savePools(allPools, 'pancakeswap_new_pools.json');
+      return allPools;
+    }
+    
+    console.log(`📂 Found ${previousPools.length} pools in previous cache`);
+    
+    // Create a set of previous pool addresses for fast lookup
+    const previousPoolAddresses = new Set(previousPools.map(pool => pool.address));
+    
+    // Fetch current pools from chain without saving to main cache
+    const currentPools = await this.fetchPoolsWithoutSaving(maxPools);
+    
+    // Find pools that weren't in the previous cache
+    const newPools: PoolInfo[] = [];
+    for (const pool of currentPools) {
+      if (!previousPoolAddresses.has(pool.address)) {
+        newPools.push(pool);
+        
+        // If we have a limit and reached it, stop processing
+        if (maxPools !== -1 && newPools.length >= maxPools) {
+          break;
+        }
+      }
+    }
+    
+    console.log(`🎯 Found ${newPools.length} new pools out of ${currentPools.length} current pools`);
+    this.storage.savePools(newPools, 'pancakeswap_new_pools.json');
+    
+    return newPools;
+  }
+
+  async fetchPoolsByTVL(
+    over?: number, 
+    under?: number, 
+    customPath?: string,
+    maxPools: number = -1, 
+    useCached: boolean = false,
+    forceRefresh: boolean = false
+  ): Promise<PoolInfo[]> {
+    console.log("🔍 Fetching pools by TVL...");
+    
+    let allPools: PoolInfo[];
+    
+    if (useCached && !forceRefresh) {
+      // Load from cache - either custom path or default
+      const cacheFile = customPath || 'pancakeswap_pools.json';
+      const cachedPools = this.storage.loadPools(cacheFile);
+      if (cachedPools && cachedPools.length > 0) {
+        console.log(`📂 Using cached pools from: ${cacheFile}`);
+        allPools = cachedPools;
+      } else {
+        console.log(`⚠️  No cached pools found at ${cacheFile}, fetching from chain...`);
+        allPools = await this.fetchPools(maxPools, false, forceRefresh);
+      }
+    } else {
+      // Fetch fresh from chain
+      if (forceRefresh) {
+        console.log("🔄 Force refresh: ignoring cache and fetching from chain...");
+      }
+      allPools = await this.fetchPools(maxPools, false, forceRefresh);
+    }
+    
+    // Get all unique token mints
+    const allMints = new Set<string>();
+    allPools.forEach(pool => {
+      allMints.add(pool.tokenMint0);
+      allMints.add(pool.tokenMint1);
+    });
+    
+    console.log(`💰 Fetching prices for ${allMints.size} unique tokens...`);
+    const prices = await getBatchTokenPrices(Array.from(allMints));
+    
+    // Calculate TVL for each pool
+    const poolsWithTVL: (PoolInfo & { tvl: number })[] = [];
+    
+    for (const pool of allPools) {
+      const tvl = await calculateTVL(pool, prices);
+      poolsWithTVL.push({ ...pool, tvl });
+    }
+    
+    // Filter by TVL thresholds
+    let filteredPools = poolsWithTVL;
+    
+    if (over !== undefined) {
+      filteredPools = filteredPools.filter(pool => pool.tvl >= over);
+      console.log(`📊 Filtered to ${filteredPools.length} pools with TVL >= $${over}`);
+    }
+    
+    if (under !== undefined) {
+      filteredPools = filteredPools.filter(pool => pool.tvl <= under);
+      console.log(`📊 Filtered to ${filteredPools.length} pools with TVL <= $${under}`);
+    }
+    
+    // Sort by TVL (highest first)
+    filteredPools.sort((a, b) => b.tvl - a.tvl);
+    
+    console.log(`🎯 Found ${filteredPools.length} pools matching TVL criteria`);
+    
+    // Save to file
+    const filename = customPath || 'pancakeswap_tvl_pools.json';
+    this.storage.savePools(filteredPools, filename);
+    
+    return filteredPools;
+  }
+
+  async getPoolSwapAccounts(poolAddress: string): Promise<{
+    address: string;
+    tokenMint0: string;
+    tokenMint1: string;
+    tokenSymbol0: string;
+    tokenSymbol1: string;
+    tokenVault0: string;
+    tokenVault1: string;
+    balance0: number;
+    balance1: number;
+    tickSpacing: number;
+    currentTick: number;
+    sqrtPriceX64: string;
+    liquidity: string;
+    isV3: boolean;
+    ammConfig: string;
+    observationState: string;
+    tickArrayLower?: string;
+    tickArrayUpper?: string;
+    tickArrayBitmap?: string;
+  } | null> {
+    try {
+      // Use the existing fetchPoolData method to get all the pool info
+      const poolInfo = await this.fetchPoolData(poolAddress);
+      
+      if (!poolInfo) {
+        console.error("❌ Pool not found or invalid");
+        return null;
+      }
+
+      // Get the raw pool account data to extract AMM config and observation state
+      const poolPubkey = new PublicKey(poolAddress);
+      const poolAccount = await this.connection.getAccountInfo(poolPubkey);
+      
+      if (!poolAccount) {
+        console.error("❌ Pool account not found");
+        return null;
+      }
+
+      // Decode pool state to get AMM config
+      const poolState = this.decodePoolState(poolAccount.data);
+      
+      // Decode observation state separately
+      const observationState = this.decodeObservationState(poolAccount.data);
+      
+      // Calculate tick array addresses
+      const tickArrays = this.calculateTickArrayAddresses(poolAddress, poolInfo.currentTick, poolInfo.tickSpacing);
+      
+      const result: any = {
+        ...poolInfo,
+        ammConfig: poolState.ammConfig,
+        observationState: observationState
+      };
+      
+      if (tickArrays.tickArrayLower) result.tickArrayLower = tickArrays.tickArrayLower;
+      if (tickArrays.tickArrayUpper) result.tickArrayUpper = tickArrays.tickArrayUpper;
+      if (tickArrays.tickArrayBitmap) result.tickArrayBitmap = tickArrays.tickArrayBitmap;
+      
+      return result;
+    } catch (error) {
+      console.error("❌ Error getting pool swap accounts:", error);
+      return null;
+    }
+  }
+
+  private decodeObservationState(data: Buffer): string {
+    // Based on PancakeSwap IDL PoolState structure
+    // observation_key is at position 8 in the structure (after vaults)
+    
+    // Calculate offset: discriminator(8) + bump(1) + amm_config(32) + owner(32) + 
+    // token_mint_0(32) + token_mint_1(32) + token_vault_0(32) + token_vault_1(32) = 201
+    const offset = 8 + 1 + 32 + 32 + 32 + 32 + 32 + 32;
+    
+    if (offset + 32 <= data.length) {
+      const observationState = new PublicKey(data.slice(offset, offset + 32));
+      return observationState.toString();
+    }
+    
+    return "OBSERVATION_STATE_NOT_FOUND";
+  }
+
+  private calculateTickArrayAddresses(poolAddress: string, currentTick: number, tickSpacing: number): {
+    tickArrayLower?: string;
+    tickArrayUpper?: string;
+    tickArrayBitmap?: string;
+  } {
+    try {
+      const poolPubkey = new PublicKey(poolAddress);
+      
+      // Based on smart_send_tx.ts implementation
+      const tickArraySpacing = tickSpacing * 60; // Use 60, not 64
+      const currentTickArrayIndex = Math.floor(currentTick / tickArraySpacing);
+      const tickArrayStartIndex = currentTickArrayIndex * tickArraySpacing;
+      
+      const [tickArrayLower] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from("tick_array"),
+          poolPubkey.toBuffer(),
+          Buffer.from(tickArrayStartIndex.toString())
+        ],
+        new PublicKey("HpNfyc2Saw7RKkQd8nEL4khUcuPhQ7WwY1B2qjx8jxFq")
+      );
+      
+      // Calculate upper tick array (next index)
+      const upperTickArrayStartIndex = (currentTickArrayIndex + 1) * tickArraySpacing;
+      
+      const [tickArrayUpper] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from("tick_array"),
+          poolPubkey.toBuffer(),
+          Buffer.from(upperTickArrayStartIndex.toString())
+        ],
+        new PublicKey("HpNfyc2Saw7RKkQd8nEL4khUcuPhQ7WwY1B2qjx8jxFq")
+      );
+      
+      const [tickArrayBitmap] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from("tick_array_bitmap"),
+          poolPubkey.toBuffer()
+        ],
+        new PublicKey("HpNfyc2Saw7RKkQd8nEL4khUcuPhQ7WwY1B2qjx8jxFq")
+      );
+      
+      return {
+        tickArrayLower: tickArrayLower.toString(),
+        tickArrayUpper: tickArrayUpper.toString(),
+        tickArrayBitmap: tickArrayBitmap.toString()
+      };
+      
+    } catch (error) {
+      console.error("Error calculating tick array addresses:", error);
+      return {};
+    }
+  }
+
+
 }

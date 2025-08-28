@@ -12,12 +12,24 @@ export class Storage {
   }
 
   private getFilePath(filename: string): string {
+    // If filename contains a path separator, treat it as a full path
+    if (filename.includes(path.sep) || filename.startsWith('/')) {
+      return filename;
+    }
     return path.join(this.baseDir, filename);
   }
 
   savePools(pools: PoolInfo[], filename: string = 'pancakeswap_pools.json'): void {
     try {
       const filePath = this.getFilePath(filename);
+      
+      // Ensure the directory exists
+      const dir = path.dirname(filePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+        console.log(`📁 Created directory: ${dir}`);
+      }
+      
       const data = {
         timestamp: new Date().toISOString(),
         totalPools: pools.length,
@@ -37,6 +49,8 @@ export class Storage {
         const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
         console.log(`📂 Loaded ${data.totalPools} pools from ${filePath} (saved: ${data.timestamp})`);
         return data.pools;
+      } else {
+        console.log(`📂 File not found: ${filePath}`);
       }
     } catch (error) {
       console.error("❌ Error loading pools:", error);

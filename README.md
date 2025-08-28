@@ -17,6 +17,20 @@ A command-line tool for fetching and analyzing PancakeSwap pools on Solana block
 - **📈 TVL Calculation**: Calculate Total Value Locked for pools
 - **🔄 Volume Tracking**: Check trading activity in the last 30 days
 - **🎯 Token Recognition**: Automatic symbol mapping for known tokens
+- **🆕 New Pool Detection**: Identify newly created pools
+- **📋 Detailed Pool Info**: Fetch complete pool data including tick arrays and observation states
+- **🎛️ Advanced Filtering**: Filter pools by TVL thresholds and other criteria
+
+## ✅ Accomplished Features
+
+- **🎯 Individual Pool Analysis**: `solana-pancake-swap pool <address>` - Fetch detailed information for a specific pool
+- **📊 TVL Filtering**: Filter pools by Total Value Locked using `--over` and `--under` flags
+- **🆕 New Pool Detection**: `solana-pancake-swap new` - Compare current pools with cached data to find new ones
+- **📋 Comprehensive Help System**: Context-aware help with `--help` and subcommand-specific documentation
+- **🔧 Configuration Management**: Save and load RPC endpoints and other settings
+- **📖 Documentation**: `solana-pancake-swap readme` - Display detailed documentation
+- **⚡ Force Refresh**: `--force` flag to overwrite cached data
+- **🎛️ Advanced CLI**: Subcommand-based interface similar to Solana CLI tools
 
 ## 🚀 Quick Start
 
@@ -29,14 +43,14 @@ npm install -g solana-pancake-swap
 ### Basic Usage
 
 ```bash
-# Set up RPC URL (saves for future use)
-solana-pancake-swap --rpc https://your-rpc.com
+# Configure RPC endpoint (required for first-time setup)
+solana-pancake-swap config --rpc https://your-rpc.com
 
 # Fetch all pools
-solana-pancake-swap
+solana-pancake-swap pools
 
 # Fetch first 50 pools
-solana-pancake-swap 50
+solana-pancake-swap pools 50
 
 # Fetch inactive pools
 solana-pancake-swap inactive
@@ -45,7 +59,7 @@ solana-pancake-swap inactive
 solana-pancake-swap no-volume
 
 # Use cached data (faster, no RPC calls)
-solana-pancake-swap --cached
+solana-pancake-swap pools --cached
 ```
 
 ### Short Alias
@@ -53,38 +67,49 @@ solana-pancake-swap --cached
 You can also use the short alias `spswap`:
 
 ```bash
-spswap 100 --rpc https://your-rpc.com
-spswap inactive --rpc https://your-rpc.com
+spswap pools 100
+spswap inactive --cached
 ```
 
 ## 📋 Commands
 
 | Command | Description |
 |---------|-------------|
-| `solana-pancake-swap [max_pools]` | Fetch all pools (max_pools optional) |
+| `solana-pancake-swap pools [max_pools]` | Fetch all pools (max_pools optional) |
 | `solana-pancake-swap inactive [max_pools]` | Fetch inactive pools (max_pools optional) |
 | `solana-pancake-swap no-volume [max_pools]` | Fetch no-volume pools (max_pools optional) |
-| `solana-pancake-swap --cached` | Use cached pools (skip chain fetch) |
+| `solana-pancake-swap new [max_pools]` | Fetch new pools (not in previous cache) |
+| `solana-pancake-swap tvl [max_pools]` | Fetch pools by TVL thresholds |
+| `solana-pancake-swap pool <address>` | Get detailed pool information |
+| `solana-pancake-swap config --rpc <url>` | Configure RPC endpoint |
+| `solana-pancake-swap readme` | Show detailed documentation |
 | `solana-pancake-swap --help` | Show help information |
+| `solana-pancake-swap --version` | Show version information |
 
 ## 🔗 RPC Configuration
 
-**RPC URL is required for first-time setup.** Use the `--rpc` or `-r` flag to specify your Solana RPC endpoint. Once saved, you can run commands without the `--rpc` flag.
+**RPC URL is required for first-time setup.** Use the `config` subcommand to save your RPC endpoint for future use.
 
 ### Example Usage
 
 ```bash
+# Configure RPC endpoint
+solana-pancake-swap config --rpc https://your-rpc.com
+
 # Fetch 50 pools
-solana-pancake-swap 50 --rpc https://your-rpc.com
+solana-pancake-swap pools 50
 
 # Fetch inactive pools
-solana-pancake-swap inactive --rpc https://your-rpc.com
+solana-pancake-swap inactive
 
 # Fetch 100 no-volume pools
-spswap no-volume 100 --rpc https://your-rpc.com
+solana-pancake-swap no-volume 100
 
 # Use cached data for faster access
-solana-pancake-swap --cached
+solana-pancake-swap pools --cached
+
+# Override saved RPC for a single command
+solana-pancake-swap pools --rpc https://different-rpc.com
 ```
 
 ### Recommended RPC Providers
@@ -103,6 +128,8 @@ The CLI generates the following JSON files in the current directory:
 | `pancakeswap_pools.json` | All valid PancakeSwap pools |
 | `pancakeswap_inactive_pools.json` | Pools with zero balance on one side |
 | `pancakeswap_no_volume_pools.json` | Pools with no trading activity in 30 days |
+| `pancakeswap_new_pools.json` | New pools (not in previous cache) |
+| `pancakeswap_tvl_pools.json` | TVL filtered pools |
 
 ### Sample Output Structure
 
@@ -191,16 +218,17 @@ Pools where one token has zero balance, indicating no liquidity.
 ### No-Volume Pools
 Pools with no trading activity in the last 30 days, identified by checking recent transaction signatures.
 
+### New Pools
+Pools that weren't present in the previous cache, useful for discovering newly created pools.
+
+### TVL Filtering
+Filter pools by Total Value Locked (USD) using `--over` and `--under` thresholds.
+
 ### Current Data
 - **Pool Addresses**: Complete pool identification
 - **Token Information**: Mint addresses, symbols, and vault addresses
 - **Token Balances**: Raw token amounts (not USD values)
 - **Pool State**: Tick spacing, current tick, and liquidity data
-
-### Future Features
-- **TVL Calculation**: Filter pools by Total Value Locked (USD)
-- **Price Integration**: Real-time token prices via Jupiter Price API
-- **Advanced Filtering**: Find pools above/below specific TVL thresholds
 
 ## 🤝 Contributing
 
@@ -242,5 +270,9 @@ If you encounter any issues or have questions:
 - [ ] Create web dashboard
 - [ ] Add historical data analysis
 - [ ] Implement pool health scoring
+- [ ] Add price impact calculation
+- [ ] Implement multi-chain support
+- [ ] Add trading volume analytics
+- [ ] Create pool comparison tools
 
 

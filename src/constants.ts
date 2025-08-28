@@ -3,6 +3,9 @@ import { PublicKey } from "@solana/web3.js";
 export const PANCAKESWAP_PROGRAM_ID = new PublicKey("HpNfyc2Saw7RKkQd8nEL4khUcuPhQ7WwY1B2qjx8jxFq");
 export const POOL_STATE_DISCRIMINATOR = [247, 237, 227, 245, 215, 195, 222, 70];
 
+// Jupiter API endpoints
+export const JUPITER_PRICE_API_V3 = "https://lite-api.jup.ag/price/v3";
+
 
 // Get RPC URL from environment variable (required)
 export function getRpcUrl(): string {
