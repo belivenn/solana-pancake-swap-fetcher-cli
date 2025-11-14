@@ -219,7 +219,7 @@ export class PancakeFetcher {
     }
   }
 
-  async fetchPoolsWithoutSaving(maxPools: number = -1): Promise<PoolInfo[]> {
+  async fetchPoolsWithoutSaving(maxPools: number = -1, skipAddresses?: Set<string>): Promise<PoolInfo[]> {
     console.log("🔍 Fetching PancakeSwap pools from chain (without saving to cache)...");
     
     try {
@@ -231,11 +231,30 @@ export class PancakeFetcher {
 
       console.log(`📊 Found ${poolAccounts.length} total accounts`);
       
+      // If we have skipAddresses, filter out already processed pools
+      let accountsToProcess = poolAccounts;
+      let skippedCount = 0;
+      
+      if (skipAddresses && skipAddresses.size > 0) {
+        accountsToProcess = poolAccounts.filter(account => {
+          const address = account.pubkey.toString();
+          if (skipAddresses.has(address)) {
+            skippedCount++;
+            return false;
+          }
+          return true;
+        });
+        console.log(`⏭️  Skipping ${skippedCount} already processed pools (${skipAddresses.size} total in skip list)`);
+        console.log(`🔄 Will process ${accountsToProcess.length} new pools`);
+      }
+      
       const validPools: PoolInfo[] = [];
       
-      for (let i = 0; i < poolAccounts.length; i++) {
-        const account = poolAccounts[i];
+      for (let i = 0; i < accountsToProcess.length; i++) {
+        const account = accountsToProcess[i];
         if (!account) continue;
+        
+        const totalProcessed = skippedCount + i + 1;
         const poolData = await this.fetchPoolData(account.pubkey.toString());
         
         if (poolData) {
@@ -247,13 +266,16 @@ export class PancakeFetcher {
           }
         }
         
-        if ((i + 1) % 10 === 0) {
-          console.log(`✅ Processed ${i + 1}/${poolAccounts.length}, found ${validPools.length} valid pools`);
+        if (totalProcessed % 10 === 0) {
+          console.log(`✅ Processed ${totalProcessed}/${poolAccounts.length} (new: ${i + 1}/${accountsToProcess.length}), found ${validPools.length} valid pools`);
           await sleep(100); // Rate limiting
         }
       }
       
-      console.log(`🎯 Found ${validPools.length} valid pools out of ${poolAccounts.length} accounts`);
+      console.log(`🎯 Found ${validPools.length} new valid pools out of ${poolAccounts.length} total accounts`);
+      if (skippedCount > 0) {
+        console.log(`⏭️  Skipped ${skippedCount} already processed pools`);
+      }
       
       // Don't save to cache - this is the key difference
       
@@ -337,9 +359,11 @@ export class PancakeFetcher {
     const previousPoolAddresses = new Set(previousPools.map(pool => pool.address));
     
     // Fetch current pools from chain without saving to main cache
-    const currentPools = await this.fetchPoolsWithoutSaving(maxPools);
+    // Pass skipAddresses to avoid processing pools we already have
+    const currentPools = await this.fetchPoolsWithoutSaving(maxPools, previousPoolAddresses);
     
-    // Find pools that weren't in the previous cache
+    // All pools returned from fetchPoolsWithoutSaving are already new (skipped addresses were filtered out)
+    // But we still filter to be safe and handle edge cases
     const newPools: PoolInfo[] = [];
     for (const pool of currentPools) {
       if (!previousPoolAddresses.has(pool.address)) {
@@ -352,8 +376,10 @@ export class PancakeFetcher {
       }
     }
     
-    console.log(`🎯 Found ${newPools.length} new pools out of ${currentPools.length} current pools`);
-    this.storage.savePools(newPools, 'pancakeswap_new_pools.json');
+    console.log(`🎯 Found ${newPools.length} new pools`);
+    if (newPools.length > 0) {
+      this.storage.savePools(newPools, 'pancakeswap_new_pools.json');
+    }
     
     return newPools;
   }

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5] - 2025-01-XX
+
+### Optimized
+- **Performance Improvement**: Optimized `new` command to skip already processed pools
+- **RPC Efficiency**: Reduced unnecessary RPC calls by filtering out previously indexed pools
+- **Incremental Processing**: Only process new pools instead of re-processing all pools
+
+### Technical
+- Modified `fetchPoolsWithoutSaving()` to accept optional `skipAddresses` parameter
+- Updated `fetchNewPools()` to pass existing pool addresses for efficient filtering
+- Significantly reduces RPC calls when checking for new pools
+
 ### Added
 - Initial release of Solana PancakeSwap Pool Fetcher CLI
 - Pool discovery and analysis functionality
